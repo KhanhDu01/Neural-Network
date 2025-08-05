@@ -23,12 +23,26 @@ class Layer_Dense:
         self.biases = np.zeros((1, n_neurons))
 
     def forward(self, inputs):
-        # Creating the output 
+        self.inputs = inputs
+        # Creating the output
         self.output = np.dot(inputs, self.weights) + self.biases
+    
+    def backward(self, dvalues):
+        # Gradients on parameters
+        self.dweight = np.dot(np.array(self.inputs).T, dvalues)
+        self.dbiases = np.sum(dvalues, axis=0, keepdims=True)
+
+        # Gradient on values to pass to previous layer
+        self.dinputs = np.dot(dvalues, np.array(self.weights).T)
 
 class Activation_ReLU:
     def forward(self, inputs):
         self.output = np.maximum(0, inputs)
+        self.inputs = inputs
+    
+    def backward(self, dvalues):
+        self.dinputs = dvalues.copy()
+        self.dinputs[self.inputs <= 0] = 0
 
 class Activation_Softmax:
     def forward(self, inputs):
@@ -55,22 +69,61 @@ class Loss_CategoricalCrossentropy(Loss):
         negative_log_likelihood = -np.log(correct_confidences)
         return negative_log_likelihood
 
-X,y = spiral_data(100, 3)
+class Activation_Softmax_Loss_Categoricalentropy:
+    def forward(self, inputs, y_true):
+        self.activation = Activation_Softmax()
+        self.activation.forward(inputs)
+        self.output = self.activation.output
+        return Loss_CategoricalCrossentropy().calculate(self.output, y_true)
+    
+    def backward(self, dvalues, y_true):
+        samples = len(dvalues)
 
-dense1 = Layer_Dense(2, 3)
+        if len(y_true.shape) ==  2:
+            y_true = np.argmax(y_true, axis = 1)
+        
+        self.dinputs = dvalues.copy()
+        self.dinputs[range(samples), y_true] -= 1
+        self.dinputs = self.dinputs / samples
+
+X, y = spiral_data(100, 3)
+
+dense1 = Layer_Dense(2, 64)
 activation1 = Activation_ReLU()
 
-dense2 = Layer_Dense(3, 3)
-activation2 = Activation_Softmax()
+dense2 = Layer_Dense(64, 64)
+activation2 = Activation_ReLU()
 
-dense1.forward(X)
-activation1.forward(dense1.output)
+dense3 = Layer_Dense(64, 3)
+loss_activation = Activation_Softmax_Loss_Categoricalentropy()
 
-dense2.forward(activation1.output)
-activation2.forward(dense2.output)
-print(activation2.output[:5])
+for epoch in range (100001):
+    # Forward pass
+    dense1.forward(X)
+    activation1.forward(dense1.output)
+    dense2.forward(activation1.output)
+    activation2.forward(dense2.output)
+    dense3.forward(activation2.output)
+    
+    # Loss and softmax
+    loss = loss_activation.forward(dense3.output, y)
+    predictions = np.argmax(loss_activation.output, axis=1)
+    accuracy = np.mean(predictions == y)
 
-loss_fuction = Loss_CategoricalCrossentropy()
-loss = loss_fuction.calculate(activation2.output, y)
+    if epoch % 1000 == 0:
+        print(f'Epoch {epoch}, Loss: {loss:.3f}, Accuracy: {accuracy:.3f}')
 
-print("Loss", loss)
+    # Backward pass
+    loss_activation.backward(loss_activation.output, y)
+    dense3.backward(loss_activation.dinputs)
+    activation2.backward(dense3.dinputs)
+    dense2.backward(activation2.dinputs)
+    activation1.backward(dense2.dinputs)
+    dense1.backward(activation1.dinputs)
+
+    # Update weights and biases (SGD)
+    learning_rate = 0.3
+    dense1.weights -= learning_rate * dense1.dweight
+    dense1.biases -= learning_rate * dense1.dbiases
+    dense2.weights -= learning_rate * dense2.dweight
+    dense2.biases -= learning_rate * dense2.dbiases
