@@ -1,6 +1,16 @@
 import numpy as np
-
+import json
 np.random.seed(0)
+
+def read(filepath):
+    i = 0
+    with open(filepath, 'r', encoding='utf-8') as f:
+        for line in f:
+            if line.strip():
+                print(json.loads(line.strip())["drawing"])
+                break
+
+read("data/The Eiffel Tower.ndjson")
 
 # For practice
 def spiral_data(points, classes):
@@ -86,7 +96,6 @@ class Activation_Softmax_Loss_Categoricalentropy:
         self.dinputs[range(samples), y_true] -= 1
         self.dinputs = self.dinputs / samples
 
-X, y = spiral_data(100, 3)
 
 dense1 = Layer_Dense(2, 64)
 activation1 = Activation_ReLU()
@@ -96,7 +105,7 @@ activation2 = Activation_ReLU()
 
 dense3 = Layer_Dense(64, 3)
 loss_activation = Activation_Softmax_Loss_Categoricalentropy()
-
+'''
 for epoch in range (100001):
     # Forward pass
     dense1.forward(X)
@@ -127,3 +136,4 @@ for epoch in range (100001):
     dense1.biases -= learning_rate * dense1.dbiases
     dense2.weights -= learning_rate * dense2.dweight
     dense2.biases -= learning_rate * dense2.dbiases
+'''
