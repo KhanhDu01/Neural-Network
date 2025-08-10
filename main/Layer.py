@@ -1,17 +1,21 @@
 import numpy as np
 import json
 np.random.seed(0)
-
+'''
 def read(filepath):
     i = 0
     with open(filepath, 'r', encoding='utf-8') as f:
         for line in f:
             if line.strip():
-                print(json.loads(line.strip())["drawing"])
+                print(json.loads(line.strip())["drawing"][1][0])
+                print("--------------------")
+                print(json.loads(line.strip())["drawing"][1][1])
+                print("--------------------")
+                print(json.loads(line.strip())["drawing"][1][2])
                 break
 
 read("data/The Eiffel Tower.ndjson")
-
+'''
 # For practice
 def spiral_data(points, classes):
     X = np.zeros((points*classes, 2))
