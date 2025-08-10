@@ -100,17 +100,27 @@ class Activation_Softmax_Loss_Categoricalentropy:
         self.dinputs[range(samples), y_true] -= 1
         self.dinputs = self.dinputs / samples
 
+X, y = spiral_data(100, 3)
 
-dense1 = Layer_Dense(2, 64)
+with open('main/model.json', 'r') as f:
+    model = json.load(f)
+
+dense1 = Layer_Dense(model['n_weights_layer1'], model['n_biases_layer1'])
+dense1.weights = model['weights_layer1']
+dense1.biases = model['biases_layer1']
 activation1 = Activation_ReLU()
 
-dense2 = Layer_Dense(64, 64)
+dense2 = Layer_Dense(model['n_weights_layer2'], model['n_biases_layer2'])
+dense2.weights = model['weights_layer2']
+dense2.biases = model['biases_layer2']
 activation2 = Activation_ReLU()
 
-dense3 = Layer_Dense(64, 3)
+dense3 = Layer_Dense(model['n_weights_layer3'], model['n_biases_layer3'])
+dense3.weights = model['weights_layer3']
+dense3.biases = model['biases_layer3']
 loss_activation = Activation_Softmax_Loss_Categoricalentropy()
-'''
-for epoch in range (100001):
+
+for epoch in range (9999):
     # Forward pass
     dense1.forward(X)
     activation1.forward(dense1.output)
@@ -140,4 +150,24 @@ for epoch in range (100001):
     dense1.biases -= learning_rate * dense1.dbiases
     dense2.weights -= learning_rate * dense2.dweight
     dense2.biases -= learning_rate * dense2.dbiases
-'''
+
+
+# Save the weights and biases of each neuron layers
+model_params = {
+    'n_weights_layer1': 2,
+    'weights_layer1': dense1.weights.tolist(),
+    'n_biases_layer1': 64,
+    'biases_layer1': dense1.biases.tolist(),
+    'n_weights_layer2': 64,
+    'weights_layer2': dense2.weights.tolist(),
+    'n_biases_layer2': 64,
+    'biases_layer2': dense2.biases.tolist(),
+    'n_weights_layer3': 64,
+    'weights_layer3': dense2.weights.tolist(),
+    'n_biases_layer3': 3,
+    'biases_layer3': dense2.biases.tolist()
+}
+
+with open('main/model.json', 'w') as f:
+    json.dump(model_params, f)
+
