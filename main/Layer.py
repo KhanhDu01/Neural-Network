@@ -2,11 +2,12 @@ import numpy as np
 import json
 import time
 import random
+from PIL import Image, ImageDraw
 
 class Layer_Dense:
     def __init__(self, n_inputs, n_neurons):
         # Initializing the set of weights depending on how many inputs, and how many neurons we want in a layer
-        self.weights = 0.1 * np.random.randn(n_inputs, n_neurons)
+        self.weights = np.random.randn(n_inputs, n_neurons) * np.sqrt(1.0 / n_inputs)
         # Initializing the biases all to 0 depending on how many neurons we wanted in the layer
         self.biases = np.zeros((1, n_neurons))
 
@@ -87,7 +88,7 @@ class Activation_Softmax_Loss_Categoricalentropy:
         self.dinputs = self.dinputs / samples
 
 class AdamOptimizer:
-    def __init__(self, params_shape, learning_rate=0.001, beta1=0.9, beta2=0.999, epsilon=1e-8):
+    def __init__(self, params_shape, learning_rate=0.000001, beta1=0.9, beta2=0.999, epsilon=1e-8):
         self.lr = learning_rate
         self.beta1 = beta1
         self.beta2 = beta2
@@ -100,6 +101,13 @@ class AdamOptimizer:
 
     def update(self, params, grads):
         self.t += 1
+
+        # GRADIENT CLIPPING - prevents explosion
+        grad_norm = np.linalg.norm(grads)
+        max_norm = 0.7  # Clip gradients to maximum norm of 1.0
+        
+        if grad_norm > max_norm:
+            grads = grads * (max_norm / grad_norm)
 
         # Update biased first moment estimate
         self.m = self.beta1 * self.m + (1 - self.beta1) * grads
@@ -119,6 +127,82 @@ class AdamOptimizer:
 
         return params
 
+class QuickDrawPreprocessor:
+    def __init__(self, image_size = 256):
+        self.image_size = image_size
+
+    # Load data from filepaths
+    def load_data(self, filepaths, max_samples=10000):
+        drawings = []
+        categories = []
+        print("Loading data...")
+        # Read each file and extract drawings and categories
+        for filepath in filepaths:
+            with open(filepath, 'r') as f:
+                for i, line in enumerate(f):
+                    if i >= max_samples:
+                        break
+                    data = json.loads(line.strip())["drawing"]
+                    categories.append(json.loads(line.strip())["word"])
+                    drawings.append(data)
+            print(f"Loaded {len(drawings)} drawings from {len(set(categories))} categories.")
+        return drawings, categories
+    
+    # Normalize the drawing data
+    def normalize_drawing(self, drawing_strokes):
+        """Normalize drawing coordinates to [0, 1] range"""
+        # Collect all points
+        all_x, all_y = [], []
+        for stroke in drawing_strokes:
+            all_x.extend(stroke[0])
+            all_y.extend(stroke[1])
+        
+        if not all_x:
+            return drawing_strokes
+        
+        # Find bounds and scale
+        min_x, max_x = min(all_x), max(all_x)
+        min_y, max_y = min(all_y), max(all_y)
+        scale = max(max_x - min_x, max_y - min_y)
+        
+        if scale == 0:
+            return drawing_strokes
+        
+        # Normalize
+        normalized = []
+        for stroke in drawing_strokes:
+            norm_x = [(x - min_x) / scale for x in stroke[0]]
+            norm_y = [(y - min_y) / scale for y in stroke[1]]
+            normalized.append([norm_x, norm_y])
+        
+        return normalized
+    
+    def drawing_to_image(self, drawing_strokes):
+        """Convert to rasterized image"""
+        img = Image.new('L', (self.image_size, self.image_size), 255)
+        draw = ImageDraw.Draw(img)
+        
+        for stroke in drawing_strokes:
+            if len(stroke[0]) > 1:
+                # Scale to image size
+                x_coords = [x * (self.image_size - 1) for x in stroke[0]]
+                y_coords = [y * (self.image_size - 1) for y in stroke[1]]
+                points = list(zip(x_coords, y_coords))
+                
+                # Draw lines
+                for i in range(len(points) - 1):
+                    draw.line([points[i], points[i+1]], fill=0, width=2)
+        
+        return np.array(img) / 255.0
+    
+    def preprocess(self, raw_drawing):
+        """Single function to do everything"""
+        # Handle both dict format and raw strokes
+        strokes = raw_drawing['drawing'] if isinstance(raw_drawing, dict) else raw_drawing
+        print(strokes)
+        normalized = self.normalize_drawing(strokes)
+        return self.drawing_to_image(normalized)
+
 # Creating a function for creating a one-hot vector for training
 def one_hot(category):
     vec = np.zeros(len(categories), dtype=int)
@@ -126,56 +210,30 @@ def one_hot(category):
     return vec
 
 
+
+
 # -------------------------------File Extraction----------------------------------------------------------------------------
-
-def read(filepaths):
-    print("Starting file extraction")
-    n_drawings = 0
-    # Initialize a collection of different drawings
-    collection = []
-    labels = []
-    for filepath in filepaths:
-        n_drawings = 0
-        print(f"Reading {filepath}")
-        with open(filepath, 'r', encoding='utf-8') as f:
-            for line in f:
-                if n_drawings < 10000:  # Limit to 10,000 drawings per file
-                    if line.strip():
-                        # The raw data of a drawing
-                        drawing_json = json.loads(line.strip())["drawing"]
-                        name = json.loads(line.strip())["word"]
-                        drawing = []
-                        for i in range(len(drawing_json)):
-                            drawing.extend(
-                                # zips a stroke in the format of (x, y, t)
-                                list(zip(
-                                    drawing_json[i][0],     #x
-                                    drawing_json[i][1],     #y
-                                    drawing_json[i][2]      #t
-                                ))
-                            )
-                        
-                        # Add collection of strokes as a drawing
-                        
-                        collection.append(drawing)
-                        labels.append(name)
-                    # Counts the number of drawings added
-                    n_drawings += 1
-        print(f"Successfully added {n_drawings} drawings")
-
-    return collection, labels
 
 dataset_files = [
     "data/The Great Wall of China.ndjson",
     "data/The Eiffel Tower.ndjson",
     "data/The Mona Lisa.ndjson",
+    "data/full_raw_aircraft carrier.ndjson",
+    "data/full_raw_airplane.ndjson",
+    "data/Alarm Clock.ndjson",
 
 ]
 
+preprocessor = QuickDrawPreprocessor()
+
+
 start = time.time()
 
-collection, labels = read(dataset_files)
+# Load and preprocess the dataset
+collection, labels = preprocessor.load_data(dataset_files, max_samples=1)
 
+processed_collection = preprocessor.preprocess(collection)
+print(processed_collection[0].shape)
 
 # Creating the different categories as an array
 categories = []
@@ -240,10 +298,10 @@ loss_activation = Activation_Softmax_Loss_Categoricalentropy()
 dense1 = Layer_Dense(3, 128)
 activation1 = Activation_ReLU()
 
-dense2 = Layer_Dense(128, 128)
-activation2 = Activation_ReLU()
+dense2 = Layer_Dense(128, len(categories))
+#activation2 = Activation_ReLU()
 
-dense3 = Layer_Dense(128, len(categories))
+#dense3 = Layer_Dense(128, len(categories))
 loss_activation = Activation_Softmax_Loss_Categoricalentropy()
 
 # ------------------------------Training the model------------------------------------------------------------------------
@@ -251,6 +309,7 @@ n = 0
 batch_size = 64
 X_batch = []
 y_batch = []
+
 
 
 for drawing, label in zip(collection, labels):
@@ -271,11 +330,11 @@ for drawing, label in zip(collection, labels):
             dense1.forward(X_batch_np)
             activation1.forward(dense1.output)
             dense2.forward(activation1.output)
-            activation2.forward(dense2.output)
-            dense3.forward(activation2.output)
+            #activation2.forward(dense2.output)
+            #dense3.forward(activation2.output)
             
             # Loss and softmax
-            loss = loss_activation.forward(dense3.output, y_batch_np)
+            loss = loss_activation.forward(dense2.output, y_batch_np)
             predictions = np.argmax(loss_activation.output, axis=1)
             targets = np.argmax(y_batch_np, axis=1)
             # Calculate accuracy
@@ -286,22 +345,23 @@ for drawing, label in zip(collection, labels):
             
             # Backward pass
             loss_activation.backward(loss_activation.output, y_batch_np)
-            dense3.backward(loss_activation.dinputs)
-            activation2.backward(dense3.dinputs)
-            dense2.backward(activation2.dinputs)
+            #dense3.backward(loss_activation.dinputs)
+            #activation2.backward(dense3.dinputs)
+            dense2.backward(loss_activation.dinputs)
             activation1.backward(dense2.dinputs)
             dense1.backward(activation1.dinputs)
 
             dense1.update_params()
             dense2.update_params()
-            dense3.update_params()
+            #dense3.update_params()
             
             X_batch = []
             y_batch = []
             n += 1
-    
+    X_batch = []
+    y_batch = []
     # Test model
-    print(predictions[-1], targets[-1])
+    #print(predictions[-1], targets[-1])
 
 # If any leftover samples in the last batch
 if X_batch:
@@ -310,10 +370,10 @@ if X_batch:
     dense1.forward(X_batch_np)
     activation1.forward(dense1.output)
     dense2.forward(activation1.output)
-    activation2.forward(dense2.output)
-    dense3.forward(activation2.output)
+    #activation2.forward(dense2.output)
+    #dense3.forward(activation2.output)
 
-    loss = loss_activation.forward(dense3.output, y_batch_np)
+    loss = loss_activation.forward(dense2.output, y_batch_np)
     predictions = np.argmax(loss_activation.output, axis=1)
     targets = np.argmax(y_batch_np, axis=1)
     accuracy = np.mean(predictions == targets)
@@ -321,15 +381,15 @@ if X_batch:
     print(f'Final Batch, Loss: {loss:.3f}, Accuracy: {accuracy:.3f}')
 
     loss_activation.backward(loss_activation.output, y_batch_np)
-    dense3.backward(loss_activation.dinputs)
-    activation2.backward(dense3.dinputs)
-    dense2.backward(activation2.dinputs)
+    #dense3.backward(loss_activation.dinputs)
+    #activation2.backward(dense3.dinputs)
+    dense2.backward(loss_activation.dinputs)
     activation1.backward(dense2.dinputs)
     dense1.backward(activation1.dinputs)
 
     dense1.update_params()
     dense2.update_params()
-    dense3.update_params()
+    #dense3.update_params()
 
 
 # -------------------------------Saving the weight and biases-----------------------------------
@@ -351,12 +411,19 @@ model_params = {
     'opt_weights_m_layer2': dense2.opt_weights.m.tolist(),
     'opt_weights_v_layer2': dense2.opt_weights.v.tolist(),
     'opt_weights_t_layer2': int(dense2.opt_weights.t),
-    'n_biases_layer2': 128,
+    'n_biases_layer2': 345,
     'biases_layer2': dense2.biases.tolist(),
     'opt_biases_m_layer2': dense2.opt_biases.m.tolist(),
     'opt_biases_v_layer2': dense2.opt_biases.v.tolist(),
     'opt_biases_t_layer2': int(dense2.opt_biases.t),
-    'n_weights_layer3': 128,
+}
+
+with open('main/model.json', 'w') as f:
+    json.dump(model_params, f)
+end = time.time()
+print(f"Success. This took {(int(end - start))/60} minutes")
+
+'''n_weights_layer3': 128,
     'weights_layer3': dense3.weights.tolist(),
     'opt_weights_m_layer3': dense3.opt_weights.m.tolist(),
     'opt_weights_v_layer3': dense3.opt_weights.v.tolist(),
@@ -365,10 +432,4 @@ model_params = {
     'biases_layer3': dense3.biases.tolist(),
     'opt_biases_m_layer3': dense3.opt_biases.m.tolist(),
     'opt_biases_v_layer3': dense3.opt_biases.v.tolist(),
-    'opt_biases_t_layer3': int(dense3.opt_biases.t)
-}
-
-with open('main/model.json', 'w') as f:
-    json.dump(model_params, f)
-end = time.time()
-print(f"Success. This took {(int(end - start))/60} minutes")
+    'opt_biases_t_layer3': int(dense3.opt_biases.t)'''
