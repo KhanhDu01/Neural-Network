@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import numpy as np
 import json
 import time
@@ -88,7 +90,7 @@ class Activation_Softmax_Loss_Categoricalentropy:
         self.dinputs = self.dinputs / samples
 
 class AdamOptimizer:
-    def __init__(self, params_shape, learning_rate=0.000001, beta1=0.9, beta2=0.999, epsilon=1e-8):
+    def __init__(self, params_shape, learning_rate=0.002, beta1=0.9, beta2=0.999, epsilon=1e-8):
         self.lr = learning_rate
         self.beta1 = beta1
         self.beta2 = beta2
@@ -104,7 +106,7 @@ class AdamOptimizer:
 
         # GRADIENT CLIPPING - prevents explosion
         grad_norm = np.linalg.norm(grads)
-        max_norm = 0.7  # Clip gradients to maximum norm of 1.0
+        max_norm = 0.85  # Clip gradients to maximum norm of 1.0
         
         if grad_norm > max_norm:
             grads = grads * (max_norm / grad_norm)
@@ -128,308 +130,288 @@ class AdamOptimizer:
         return params
 
 class QuickDrawPreprocessor:
-    def __init__(self, image_size = 256):
+    def __init__(self, image_size = 28):
         self.image_size = image_size
 
-    # Load data from filepaths
-    def load_data(self, filepaths, max_samples=10000):
-        drawings = []
-        categories = []
-        print("Loading data...")
-        # Read each file and extract drawings and categories
-        for filepath in filepaths:
-            with open(filepath, 'r') as f:
-                for i, line in enumerate(f):
-                    if i >= max_samples:
+    def load_dataset(self, files, max_samples_per_category=5000):
+        X, y = [], []
+
+        for filename in files:
+            category = Path(filename).name
+            category = category.removeprefix("full_simplified_")
+            category = category.removesuffix(".ndjson")
+
+            print(f"Loading {category}...")
+
+            with open(filename, "r", encoding="utf-8") as f:
+                count = 0
+
+                for line in f:
+                    if count >= max_samples_per_category:
                         break
-                    data = json.loads(line.strip())["drawing"]
-                    categories.append(json.loads(line.strip())["word"])
-                    drawings.append(data)
-            print(f"Loaded {len(drawings)} drawings from {len(set(categories))} categories.")
-        return drawings, categories
-    
-    # Normalize the drawing data
-    def normalize_drawing(self, drawing_strokes):
-        """Normalize drawing coordinates to [0, 1] range"""
-        # Collect all points
-        all_x, all_y = [], []
-        for stroke in drawing_strokes:
-            all_x.extend(stroke[0])
-            all_y.extend(stroke[1])
-        
-        if not all_x:
-            return drawing_strokes
-        
-        # Find bounds and scale
-        min_x, max_x = min(all_x), max(all_x)
-        min_y, max_y = min(all_y), max(all_y)
-        scale = max(max_x - min_x, max_y - min_y)
-        
-        if scale == 0:
-            return drawing_strokes
-        
-        # Normalize
-        normalized = []
-        for stroke in drawing_strokes:
-            norm_x = [(x - min_x) / scale for x in stroke[0]]
-            norm_y = [(y - min_y) / scale for y in stroke[1]]
-            normalized.append([norm_x, norm_y])
-        
-        return normalized
-    
-    def drawing_to_image(self, drawing_strokes):
-        """Convert to rasterized image"""
-        img = Image.new('L', (self.image_size, self.image_size), 255)
-        draw = ImageDraw.Draw(img)
-        
-        for stroke in drawing_strokes:
-            if len(stroke[0]) > 1:
-                # Scale to image size
-                x_coords = [x * (self.image_size - 1) for x in stroke[0]]
-                y_coords = [y * (self.image_size - 1) for y in stroke[1]]
-                points = list(zip(x_coords, y_coords))
-                
-                # Draw lines
-                for i in range(len(points) - 1):
-                    draw.line([points[i], points[i+1]], fill=0, width=2)
-        
-        return np.array(img) / 255.0
-    
-    def preprocess(self, raw_drawing):
-        """Single function to do everything"""
-        # Handle both dict format and raw strokes
-        strokes = raw_drawing['drawing'] if isinstance(raw_drawing, dict) else raw_drawing
-        print(strokes)
-        normalized = self.normalize_drawing(strokes)
-        return self.drawing_to_image(normalized)
+                    try:
+                        record = json.loads(line)
+                    except json.JSONDecodeError:
+                        print(f"Skipping invalid JSON line in {filename}: {line.strip()}")
+                        continue
 
-# Creating a function for creating a one-hot vector for training
-def one_hot(category):
-    vec = np.zeros(len(categories), dtype=int)
-    vec[categories_to_index[category]] = 1
-    return vec
+                    if not record.get("recognized", True):
+                        continue
 
+                    X.append(self.load_drawing(record))
+                    y.append(category)
+                    count += 1
 
+            print(f"Loaded {count} samples for {category}")
+
+        return np.array(X, dtype=np.float32), np.array(y)
+
+    # Load data from filepaths
+    def load_drawing(self, file, max_samples=10000):
+        canvas = Image.new("L", (256, 256), 0)
+        draw = ImageDraw.Draw(canvas)
+
+        for stroke in file["drawing"]:
+            xs = stroke[0]
+            ys = stroke[1]
+
+            points = list(zip(xs, ys))
+
+            if len(points) == 1:
+                x, y = points[0]
+                draw.point((x, y), fill=255)
+            elif len(points) > 1:
+                draw.line(points, fill=255, width=5)
+
+        canvas = canvas.resize((self.image_size, self.image_size))
+        return np.asarray(canvas, dtype=np.float32).flatten() / 255
+def load_categories(filepath="data/categories.txt"):
+    with open(filepath, "r", encoding="utf-8") as f:
+        return [line.strip() for line in f if line.strip()]
 
 
 # -------------------------------File Extraction----------------------------------------------------------------------------
 
-dataset_files = [
-    "data/The Great Wall of China.ndjson",
-    "data/The Eiffel Tower.ndjson",
-    "data/The Mona Lisa.ndjson",
-    "data/full_raw_aircraft carrier.ndjson",
-    "data/full_raw_airplane.ndjson",
-    "data/Alarm Clock.ndjson",
+if __name__ == "__main__":
 
-]
+    dataset_files = [
+        "data/full_simplified_The Eiffel Tower.ndjson",
+        "data/full_simplified_The Mona Lisa.ndjson",
+        "data/full_simplified_The Great Wall of China.ndjson",
 
-preprocessor = QuickDrawPreprocessor()
+    ]
 
-
-start = time.time()
-
-# Load and preprocess the dataset
-collection, labels = preprocessor.load_data(dataset_files, max_samples=1)
-
-processed_collection = preprocessor.preprocess(collection)
-print(processed_collection[0].shape)
-
-# Creating the different categories as an array
-categories = []
-with open ('data/categories.txt', 'r') as f:
-    for line in f:
-        categories.append(line[:-1])
-
-# Categories as an index
-categories_to_index = {category: i for i, category in enumerate(categories)}
-
-#Shuffle the data
-combined = []
-print("Shuffling the data...")
-for drawing in collection:
-    combined.append((drawing, labels[collection.index(drawing)]))
-random.shuffle(combined)
-collection, labels = zip(*combined)
-print("Data shuffled successfully")
+    preprocessor = QuickDrawPreprocessor()
 
 
-# ------------------------Creating the model-----------------------------------------------
-'''
-# !USE IF ALREADY HAVE A MODEL SAVED!
-with open('main/model.json', 'r') as f:
-    model = json.load(f)
+    start = time.time()
 
-dense1 = Layer_Dense(model['n_weights_layer1'], model['n_biases_layer1'])
-dense1.weights = model['weights_layer1']
-dense1.biases = model['biases_layer1']
-dense1.opt_weights.m = np.array(model['opt_weights_m_layer1'])
-dense1.opt_weights.v = np.array(model['opt_weights_v_layer1'])
-dense1.opt_weights.t = np.array(model['opt_weights_t_layer1'])
-dense1.opt_biases.m = np.array(model['opt_biases_m_layer1'])
-dense1.opt_biases.v = np.array(model['opt_biases_v_layer1'])
-dense1.opt_biases.t = np.array(model['opt_biases_t_layer1'])
-activation1 = Activation_ReLU()
+    print("Loading and preprocessing the dataset...")
+    # Load and preprocess the dataset
+    collection, labels = preprocessor.load_dataset(dataset_files)
+    X = collection
+    categories = load_categories("data/categories.txt")
 
-dense2 = Layer_Dense(model['n_weights_layer2'], model['n_biases_layer2'])
-dense2.weights = model['weights_layer2']
-dense2.biases = model['biases_layer2']
-dense2.opt_weights.m = np.array(model['opt_weights_m_layer2'])
-dense2.opt_weights.v = np.array(model['opt_weights_v_layer2'])
-dense2.opt_weights.t = np.array(model['opt_weights_t_layer2'])
-dense2.opt_biases.m = np.array(model['opt_biases_m_layer2'])
-dense2.opt_biases.v = np.array(model['opt_biases_v_layer2'])
-dense2.opt_biases.t = np.array(model['opt_biases_t_layer2'])
-activation2 = Activation_ReLU()
+    # Only keep categories represented in the loaded dataset
+    unique_labels = sorted(set(labels.tolist()))
 
-dense3 = Layer_Dense(model['n_weights_layer3'], model['n_biases_layer3'])
-dense3.weights = model['weights_layer3']
-dense3.biases = model['biases_layer3']
-dense3.opt_weights.m = np.array(model['opt_weights_m_layer3'])
-dense3.opt_weights.v = np.array(model['opt_weights_v_layer3'])
-dense3.opt_weights.t = np.array(model['opt_weights_t_layer3'])
-dense3.opt_biases.m = np.array(model['opt_biases_m_layer3'])
-dense3.opt_biases.v = np.array(model['opt_biases_v_layer3'])
-dense3.opt_biases.t = np.array(model['opt_biases_t_layer3'])
-loss_activation = Activation_Softmax_Loss_Categoricalentropy()
-'''
+    # Validate that every dataset category exists in categories.txt
+    missing = set(unique_labels) - set(categories)
 
-# !USE TO CREATE A NEW MODEL!
-dense1 = Layer_Dense(3, 128)
-activation1 = Activation_ReLU()
+    if missing:
+        raise ValueError(
+            f"These dataset categories are missing from categories.txt: {missing}"
+        )
 
-dense2 = Layer_Dense(128, len(categories))
-#activation2 = Activation_ReLU()
+    # Use the order defined by categories.txt
+    unique_labels = [c for c in categories if c in unique_labels]
 
-#dense3 = Layer_Dense(128, len(categories))
-loss_activation = Activation_Softmax_Loss_Categoricalentropy()
+    label_to_index = {
+        category: i for i, category in enumerate(unique_labels)
+    }
 
-# ------------------------------Training the model------------------------------------------------------------------------
-n = 0
-batch_size = 64
-X_batch = []
-y_batch = []
+    y = np.array(
+        [label_to_index[label] for label in labels],
+        dtype=np.int64
+    )
+
+    y_onehot = np.eye(len(unique_labels), dtype=np.float32)[y]
+
+    print("Categories:", unique_labels)
+    print("Number of categories:", len(unique_labels))
+    print("X shape:", collection.shape)
+    print("y shape:", y.shape)
+    print("One-hot shape:", y_onehot.shape)
 
 
+    # ------------------------Creating the model-----------------------------------------------
+    '''
+    # !USE IF ALREADY HAVE A MODEL SAVED!
+    with open('main/model.json', 'r') as f:
+        model = json.load(f)
 
-for drawing, label in zip(collection, labels):
-    y = one_hot(label)
-    for stroke in drawing:
+    dense1 = Layer_Dense(model['n_weights_layer1'], model['n_biases_layer1'])
+    dense1.weights = model['weights_layer1']
+    dense1.biases = model['biases_layer1']
+    dense1.opt_weights.m = np.array(model['opt_weights_m_layer1'])
+    dense1.opt_weights.v = np.array(model['opt_weights_v_layer1'])
+    dense1.opt_weights.t = np.array(model['opt_weights_t_layer1'])
+    dense1.opt_biases.m = np.array(model['opt_biases_m_layer1'])
+    dense1.opt_biases.v = np.array(model['opt_biases_v_layer1'])
+    dense1.opt_biases.t = np.array(model['opt_biases_t_layer1'])
+    activation1 = Activation_ReLU()
 
-        # Normalize the stroke data
-        x_norm = stroke[0] / 256.0
-        y_norm = stroke[1] / 256.0
-        t_norm = stroke[2] / 1000.0
-        X = (x_norm, y_norm, t_norm)
-        X_batch.append(X)
-        y_batch.append(y)
-        if len(X_batch) >= batch_size:
-            X_batch_np = np.array(X_batch)
-            y_batch_np = np.array(y_batch)
-            # Forward pass
-            dense1.forward(X_batch_np)
+    dense2 = Layer_Dense(model['n_weights_layer2'], model['n_biases_layer2'])
+    dense2.weights = model['weights_layer2']
+    dense2.biases = model['biases_layer2']
+    dense2.opt_weights.m = np.array(model['opt_weights_m_layer2'])
+    dense2.opt_weights.v = np.array(model['opt_weights_v_layer2'])
+    dense2.opt_weights.t = np.array(model['opt_weights_t_layer2'])
+    dense2.opt_biases.m = np.array(model['opt_biases_m_layer2'])
+    dense2.opt_biases.v = np.array(model['opt_biases_v_layer2'])
+    dense2.opt_biases.t = np.array(model['opt_biases_t_layer2'])
+    activation2 = Activation_ReLU()
+
+    dense3 = Layer_Dense(model['n_weights_layer3'], model['n_biases_layer3'])
+    dense3.weights = model['weights_layer3']
+    dense3.biases = model['biases_layer3']
+    dense3.opt_weights.m = np.array(model['opt_weights_m_layer3'])
+    dense3.opt_weights.v = np.array(model['opt_weights_v_layer3'])
+    dense3.opt_weights.t = np.array(model['opt_weights_t_layer3'])
+    dense3.opt_biases.m = np.array(model['opt_biases_m_layer3'])
+    dense3.opt_biases.v = np.array(model['opt_biases_v_layer3'])
+    dense3.opt_biases.t = np.array(model['opt_biases_t_layer3'])
+    loss_activation = Activation_Softmax_Loss_Categoricalentropy()
+    '''
+
+    # !USE TO CREATE A NEW MODEL!
+    num_classes = len(unique_labels)
+
+    dense1 = Layer_Dense(784, 128)
+    activation1 = Activation_ReLU()
+
+    dense2 = Layer_Dense(128, 128)
+    activation2 = Activation_ReLU()
+
+    dense3 = Layer_Dense(128, num_classes)
+
+    loss_activation = Activation_Softmax_Loss_Categoricalentropy()
+
+    # ------------------------------Training the model------------------------------------------------------------------------
+
+
+    epochs = 10
+    batch_size = 64
+
+    for epoch in range(epochs):
+        start_time = time.time()
+
+        # Shuffle the drawings and labels together
+        indices = np.random.permutation(len(X))
+        X_shuffled = X[indices]
+        y_shuffled = y_onehot[indices]
+
+        total_loss = 0.0
+        total_correct = 0
+        total_samples = 0
+
+        for start in range(0, len(X), batch_size):
+            X_batch = X_shuffled[start:start + batch_size]
+            y_batch = y_shuffled[start:start + batch_size]
+            batch_n = len(X_batch)
+
+            # ---------------- Forward pass ----------------
+            dense1.forward(X_batch)
             activation1.forward(dense1.output)
+
             dense2.forward(activation1.output)
-            #activation2.forward(dense2.output)
-            #dense3.forward(activation2.output)
-            
-            # Loss and softmax
-            loss = loss_activation.forward(dense2.output, y_batch_np)
-            predictions = np.argmax(loss_activation.output, axis=1)
-            targets = np.argmax(y_batch_np, axis=1)
-            # Calculate accuracy
-            accuracy = np.mean(predictions == targets)
-            
-            if n % 1000 == 0:
-                print(f"Epoch {n}, Loss: {loss:.3f}, Accuracy: {accuracy:.3f}")
-            
-            # Backward pass
-            loss_activation.backward(loss_activation.output, y_batch_np)
-            #dense3.backward(loss_activation.dinputs)
-            #activation2.backward(dense3.dinputs)
-            dense2.backward(loss_activation.dinputs)
+            activation2.forward(dense2.output)
+
+            dense3.forward(activation2.output)
+
+            # Softmax + categorical cross-entropy
+            loss = loss_activation.forward(
+                dense3.output, y_batch
+            )
+
+            # Measure predictions
+            predictions = np.argmax(
+                loss_activation.output, axis=1
+            )
+            targets = np.argmax(y_batch, axis=1)
+
+            total_loss += loss * batch_n
+            total_correct += np.sum(predictions == targets)
+            total_samples += batch_n
+
+            # ---------------- Backward pass ----------------
+            loss_activation.backward(
+                loss_activation.output, y_batch
+            )
+
+            dense3.backward(loss_activation.dinputs)
+
+            activation2.backward(dense3.dinputs)
+            dense2.backward(activation2.dinputs)
+
             activation1.backward(dense2.dinputs)
             dense1.backward(activation1.dinputs)
 
+            # ---------------- Update parameters ----------------
             dense1.update_params()
             dense2.update_params()
-            #dense3.update_params()
-            
-            X_batch = []
-            y_batch = []
-            n += 1
-    X_batch = []
-    y_batch = []
-    # Test model
-    #print(predictions[-1], targets[-1])
+            dense3.update_params()
 
-# If any leftover samples in the last batch
-if X_batch:
-    X_batch_np = np.array(X_batch)
-    y_batch_np = np.array(y_batch)
-    dense1.forward(X_batch_np)
-    activation1.forward(dense1.output)
-    dense2.forward(activation1.output)
-    #activation2.forward(dense2.output)
-    #dense3.forward(activation2.output)
+        avg_loss = total_loss / total_samples
+        accuracy = total_correct / total_samples
+        elapsed = time.time() - start_time
 
-    loss = loss_activation.forward(dense2.output, y_batch_np)
-    predictions = np.argmax(loss_activation.output, axis=1)
-    targets = np.argmax(y_batch_np, axis=1)
-    accuracy = np.mean(predictions == targets)
+        print(
+            f"Epoch {epoch + 1}/{epochs} | "
+            f"Loss: {avg_loss:.4f} | "
+            f"Accuracy: {accuracy:.2%} | "
+            f"Time: {elapsed:.1f}s"
+        )
 
-    print(f'Final Batch, Loss: {loss:.3f}, Accuracy: {accuracy:.3f}')
+    # -------------------------------Saving the weight and biases-----------------------------------
+    print("Saving model parameters...")
+    # Save the weights and biases of each neuron layers
+    model_params = {
+        'n_weights_layer1': 784,
+        'weights_layer1': dense1.weights.tolist(),
+        'opt_weights_m_layer1': dense1.opt_weights.m.tolist(),
+        'opt_weights_v_layer1': dense1.opt_weights.v.tolist(),
+        'opt_weights_t_layer1': int(dense1.opt_weights.t),
+        'n_biases_layer1': 128,
+        'biases_layer1': dense1.biases.tolist(),
+        'opt_biases_m_layer1': dense1.opt_biases.m.tolist(),
+        'opt_biases_v_layer1': dense1.opt_biases.v.tolist(),
+        'opt_biases_t_layer1': int(dense1.opt_biases.t),
+        'n_weights_layer2': 128,
+        'weights_layer2': dense2.weights.tolist(),
+        'opt_weights_m_layer2': dense2.opt_weights.m.tolist(),
+        'opt_weights_v_layer2': dense2.opt_weights.v.tolist(),
+        'opt_weights_t_layer2': int(dense2.opt_weights.t),
+        'n_biases_layer2': 128,
+        'biases_layer2': dense2.biases.tolist(),
+        'opt_biases_m_layer2': dense2.opt_biases.m.tolist(),
+        'opt_biases_v_layer2': dense2.opt_biases.v.tolist(),
+        'opt_biases_t_layer2': int(dense2.opt_biases.t),
+        'n_weights_layer3': 128,
+        'weights_layer3': dense3.weights.tolist(),
+        'opt_weights_m_layer3': dense3.opt_weights.m.tolist(),
+        'opt_weights_v_layer3': dense3.opt_weights.v.tolist(),
+        'opt_weights_t_layer3': int(dense3.opt_weights.t),
+        'n_biases_layer3': num_classes,
+        'biases_layer3': dense3.biases.tolist(),
+        'opt_biases_m_layer3': dense3.opt_biases.m.tolist(),
+        'opt_biases_v_layer3': dense3.opt_biases.v.tolist(),
+        'opt_biases_t_layer3': int(dense3.opt_biases.t),
+    }
 
-    loss_activation.backward(loss_activation.output, y_batch_np)
-    #dense3.backward(loss_activation.dinputs)
-    #activation2.backward(dense3.dinputs)
-    dense2.backward(loss_activation.dinputs)
-    activation1.backward(dense2.dinputs)
-    dense1.backward(activation1.dinputs)
+    model_params['categories'] = unique_labels
 
-    dense1.update_params()
-    dense2.update_params()
-    #dense3.update_params()
-
-
-# -------------------------------Saving the weight and biases-----------------------------------
-print("Saving model parameters...")
-# Save the weights and biases of each neuron layers
-model_params = {
-    'n_weights_layer1': 3,
-    'weights_layer1': dense1.weights.tolist(),
-    'opt_weights_m_layer1': dense1.opt_weights.m.tolist(),
-    'opt_weights_v_layer1': dense1.opt_weights.v.tolist(),
-    'opt_weights_t_layer1': int(dense1.opt_weights.t),
-    'n_biases_layer1': 128,
-    'biases_layer1': dense1.biases.tolist(),
-    'opt_biases_m_layer1': dense1.opt_biases.m.tolist(),
-    'opt_biases_v_layer1': dense1.opt_biases.v.tolist(),
-    'opt_biases_t_layer1': int(dense1.opt_biases.t),
-    'n_weights_layer2': 128,
-    'weights_layer2': dense2.weights.tolist(),
-    'opt_weights_m_layer2': dense2.opt_weights.m.tolist(),
-    'opt_weights_v_layer2': dense2.opt_weights.v.tolist(),
-    'opt_weights_t_layer2': int(dense2.opt_weights.t),
-    'n_biases_layer2': 345,
-    'biases_layer2': dense2.biases.tolist(),
-    'opt_biases_m_layer2': dense2.opt_biases.m.tolist(),
-    'opt_biases_v_layer2': dense2.opt_biases.v.tolist(),
-    'opt_biases_t_layer2': int(dense2.opt_biases.t),
-}
-
-with open('main/model.json', 'w') as f:
-    json.dump(model_params, f)
-end = time.time()
-print(f"Success. This took {(int(end - start))/60} minutes")
-
-'''n_weights_layer3': 128,
-    'weights_layer3': dense3.weights.tolist(),
-    'opt_weights_m_layer3': dense3.opt_weights.m.tolist(),
-    'opt_weights_v_layer3': dense3.opt_weights.v.tolist(),
-    'opt_weights_t_layer3': int(dense3.opt_weights.t),
-    'n_biases_layer3': 345,
-    'biases_layer3': dense3.biases.tolist(),
-    'opt_biases_m_layer3': dense3.opt_biases.m.tolist(),
-    'opt_biases_v_layer3': dense3.opt_biases.v.tolist(),
-    'opt_biases_t_layer3': int(dense3.opt_biases.t)'''
+    with open('main/model.json', 'w') as f:
+        json.dump(model_params, f)
+    end = time.time()
+    print(f"Success. This took {(int(end - start))/60} minutes")
