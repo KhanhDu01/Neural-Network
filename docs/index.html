@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Quick, Draw! - Neural Network Playground</title>
+<link rel="icon" href="data:," />
+<link rel="stylesheet" href="style.css?v=2" />
+</head>
+<body>
+  <header>
+    <h1>Quick, Draw! Neural Network</h1>
+    <p class="subtitle">A from-scratch CNN classifying doodles into 345 categories</p>
+  </header>
+
+  <main>
+    <!-- ===== Neural network diagram ===== -->
+    <section class="diagram-section">
+      <div class="diagram-head">
+        <h2>How the network sees it</h2>
+        <span id="modelStatus" class="status">Loading model&hellip;</span>
+      </div>
+      <div class="diagram-scroll">
+        <canvas id="diagram"></canvas>
+      </div>
+    </section>
+
+    <!-- ===== Drawing + predictions ===== -->
+    <section class="play-section">
+      <div class="pad-column">
+        <div class="pad-wrap">
+          <canvas id="pad" width="256" height="256"></canvas>
+        </div>
+        <div class="pad-controls">
+          <button id="clearBtn" type="button">Clear</button>
+          <label class="brush">
+            Pen
+            <input id="brush" type="range" min="4" max="24" value="12" />
+          </label>
+          <span id="inferTime" class="status"></span>
+        </div>
+        <p class="hint">Draw a doodle above. Predictions update automatically.</p>
+      </div>
+
+      <div class="results-column">
+        <h2>Top 3 guesses</h2>
+        <ol id="predictions" class="predictions">
+          <li class="placeholder">Start drawing to see predictions&hellip;</li>
+        </ol>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <span id="footerNote">Model made from scratch with NumPy &middot; runs entirely in your browser</span>
+  </footer>
+
+  <script src="app.js?v=2"></script>
+</body>
+</html>

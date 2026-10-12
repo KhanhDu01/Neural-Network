@@ -8,7 +8,7 @@ from Layer import QuickDrawPreprocessor
 DATA_DIR = Path("data")
 CACHE_DIR = DATA_DIR / "cache"
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
-N_PER_CLASS = 2000
+N_PER_CLASS = 7000
 BASE_URL = "https://storage.googleapis.com/quickdraw_dataset/full/simplified"
 
 def cache_category(category, pre):

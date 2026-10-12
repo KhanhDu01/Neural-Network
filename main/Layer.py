@@ -9,9 +9,9 @@ from PIL import Image, ImageDraw
 class Layer_Dense:
     def __init__(self, n_inputs, n_neurons):
         # Initializing the set of weights depending on how many inputs, and how many neurons we want in a layer
-        self.weights = np.random.randn(n_inputs, n_neurons) * np.sqrt(1.0 / n_inputs)
+        self.weights = (np.random.randn(n_inputs, n_neurons) * np.sqrt(2.0 / n_inputs)).astype(np.float32)
         # Initializing the biases all to 0 depending on how many neurons we wanted in the layer
-        self.biases = np.zeros((1, n_neurons))
+        self.biases = np.zeros((1, n_neurons), dtype=np.float32)
 
         # Adam Optimizer
         self.opt_weights = AdamOptimizer(self.weights.shape)
@@ -90,26 +90,19 @@ class Activation_Softmax_Loss_Categoricalentropy:
         self.dinputs = self.dinputs / samples
 
 class AdamOptimizer:
-    def __init__(self, params_shape, learning_rate=0.002, beta1=0.9, beta2=0.999, epsilon=1e-8):
+    def __init__(self, params_shape, learning_rate=0.0005, beta1=0.9, beta2=0.999, epsilon=1e-8):
         self.lr = learning_rate
         self.beta1 = beta1
         self.beta2 = beta2
         self.epsilon = epsilon
         
         # Initialize first and second moment vectors for all parameters
-        self.m = np.zeros(params_shape)
-        self.v = np.zeros(params_shape)
+        self.m = np.zeros(params_shape, dtype=np.float32)
+        self.v = np.zeros(params_shape, dtype=np.float32)
         self.t = 0  # timestep  
 
     def update(self, params, grads):
         self.t += 1
-
-        # GRADIENT CLIPPING - prevents explosion
-        grad_norm = np.linalg.norm(grads)
-        max_norm = 0.85  # Clip gradients to maximum norm of 1.0
-        
-        if grad_norm > max_norm:
-            grads = grads * (max_norm / grad_norm)
 
         # Update biased first moment estimate
         self.m = self.beta1 * self.m + (1 - self.beta1) * grads
@@ -128,6 +121,21 @@ class AdamOptimizer:
         params -= params_update
 
         return params
+
+class Layer_Dropout:
+    def __init__(self, rate=0.2):
+        self.keep = 1.0 - rate
+
+    def forward(self, inputs, training=True):
+        if not training:
+            self.mask = None
+            self.output = inputs
+            return
+        self.mask = (np.random.rand(*inputs.shape) < self.keep).astype(np.float32) / self.keep
+        self.output = inputs * self.mask
+
+    def backward(self, dvalues):
+        self.dinputs = dvalues if self.mask is None else dvalues * self.mask
 
 class QuickDrawPreprocessor:
     def __init__(self, image_size = 28):

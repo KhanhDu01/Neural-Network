@@ -19,23 +19,26 @@ from Layer import (
     Layer_Dense,
     Activation_ReLU,
     Activation_Softmax_Loss_Categoricalentropy,
+    Layer_Dropout,
 )
 
 DATA_DIR = Path("data")
 CACHE_DIR = DATA_DIR / "cache"
 MODEL_PATH = Path("main/model.json")
 
-EPOCHS = 10
-BATCH_SIZE = 64
+EPOCHS = 30
+BATCH_SIZE = 1024
 VAL_FRACTION = 0.05
 
 
 class Model:
-    def __init__(self, dense1, activation1, dense2, activation2, dense3, loss_activation):
+    def __init__(self, dense1, activation1, dropout1, dense2, activation2, dropout2, dense3, loss_activation):
         self.dense1 = dense1
         self.activation1 = activation1
+        self.dropout1 = dropout1
         self.dense2 = dense2
         self.activation2 = activation2
+        self.dropout2 = dropout2
         self.dense3 = dense3
         self.loss_activation = loss_activation
 
@@ -46,9 +49,9 @@ class Model:
 
 def initialize_or_load_model(n_categories, initialize=False):
     if initialize:
-        dense1 = Layer_Dense(784, 128)
-        dense2 = Layer_Dense(128, 128)
-        dense3 = Layer_Dense(128, n_categories)
+        dense1 = Layer_Dense(784, 512)
+        dense2 = Layer_Dense(512, 512)
+        dense3 = Layer_Dense(512, n_categories)
     else:
         with open(MODEL_PATH, "r") as f:
             saved = json.load(f)
@@ -68,8 +71,8 @@ def initialize_or_load_model(n_categories, initialize=False):
         dense1, dense2, dense3 = denses
 
     return Model(
-        dense1, Activation_ReLU(),
-        dense2, Activation_ReLU(),
+        dense1, Activation_ReLU(), Layer_Dropout(),
+        dense2, Activation_ReLU(), Layer_Dropout(),
         dense3, Activation_Softmax_Loss_Categoricalentropy(),
     )
 
@@ -108,12 +111,14 @@ def load_all(categories):
     return np.concatenate(Xs), np.concatenate(ys)
 
 
-def forward(model, X_batch):
+def forward(model, X_batch, training=True):
     model.dense1.forward(X_batch)
     model.activation1.forward(model.dense1.output)
-    model.dense2.forward(model.activation1.output)
+    model.dropout1.forward(model.activation1.output, training=training)
+    model.dense2.forward(model.dropout1.output)
     model.activation2.forward(model.dense2.output)
-    model.dense3.forward(model.activation2.output)
+    model.dropout2.forward(model.activation2.output, training=training)
+    model.dense3.forward(model.dropout2.output)
 
 
 def evaluate(model, X, y, n_classes, batch_size=512):
@@ -122,7 +127,7 @@ def evaluate(model, X, y, n_classes, batch_size=512):
     for s in range(0, len(X), batch_size):
         X_batch = X[s:s + batch_size].astype(np.float32) / 255.0
         y_batch = np.eye(n_classes, dtype=np.float32)[y[s:s + batch_size]]
-        forward(model, X_batch)
+        forward(model, X_batch, training = False)
         loss = model.loss_activation.forward(model.dense3.output, y_batch)
         total_loss += loss * len(X_batch)
         correct += np.sum(np.argmax(model.loss_activation.output, axis=1) == y[s:s + batch_size])
@@ -131,7 +136,8 @@ def evaluate(model, X, y, n_classes, batch_size=512):
 
 def train(model, X, y, X_val, y_val, categories, epochs=EPOCHS, batch_size=BATCH_SIZE):
     n_classes = len(categories)
-
+    best_val = float("inf")
+    patience, bad = 3, 0
     for epoch in range(epochs):
         t0 = time.time()
         idx = np.random.permutation(len(X))
@@ -149,9 +155,11 @@ def train(model, X, y, X_val, y_val, categories, epochs=EPOCHS, batch_size=BATCH
             # Backward
             model.loss_activation.backward(model.loss_activation.output, y_batch)
             model.dense3.backward(model.loss_activation.dinputs)
-            model.activation2.backward(model.dense3.dinputs)
+            model.dropout2.backward(model.dense3.dinputs)
+            model.activation2.backward(model.dropout2.dinputs)
             model.dense2.backward(model.activation2.dinputs)
-            model.activation1.backward(model.dense2.dinputs)
+            model.dropout1.backward(model.dense2.dinputs)
+            model.activation1.backward(model.dropout1.dinputs)
             model.dense1.backward(model.activation1.dinputs)
 
             # Update
@@ -169,7 +177,15 @@ def train(model, X, y, X_val, y_val, categories, epochs=EPOCHS, batch_size=BATCH
             f"Val loss: {val_loss:.4f} | Val acc: {val_acc:.2%} | "
             f"Time: {time.time() - t0:.1f}s"
         )
-        save_model(model, categories)  # checkpoint every epoch
+        if val_loss < best_val:
+            best_val, bad = val_loss, 0
+            save_model(model, categories)
+            print("  saved (best val loss)")
+        else:
+            bad += 1
+            if bad >= patience:
+                print("Early stopping.")
+                break
 
 
 def main():
@@ -205,6 +221,7 @@ def main():
         model = initialize_or_load_model(len(categories), initialize=False)
 
     try:
+        print("Training...")
         train(model, X_train, y_train, X_val, y_val, categories)
     except KeyboardInterrupt:
         print("\nInterrupted. Last completed epoch is saved; run 'python Train.py continue' to resume.")
