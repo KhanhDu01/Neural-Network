@@ -3,46 +3,54 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="color-scheme" content="dark" />
 <title>Quick, Draw! - Neural Network Playground</title>
 <link rel="icon" href="data:," />
-<link rel="stylesheet" href="style.css?v=2" />
+<link rel="stylesheet" href="style.css?v=3" />
 </head>
 <body>
-  <header>
+  <header class="site-header">
     <h1>Quick, Draw! Neural Network</h1>
-    <p class="subtitle">A from-scratch CNN classifying doodles into 345 categories</p>
+    <p class="site-tagline">A from-scratch CNN classifying doodles into 345 categories</p>
   </header>
 
-  <main>
+  <main class="site-main">
     <!-- ===== Neural network diagram ===== -->
-    <section class="diagram-section">
-      <div class="diagram-head">
-        <h2>How the network sees it</h2>
-        <span id="modelStatus" class="status">Loading model&hellip;</span>
+    <section class="network-diagram" aria-labelledby="diagram-heading">
+      <div class="section-header">
+        <h2 id="diagram-heading">How the network sees it</h2>
+        <span id="modelStatus" class="status-text" role="status">Loading model&hellip;</span>
       </div>
       <div class="diagram-scroll">
-        <canvas id="diagram"></canvas>
+        <canvas id="diagram" role="img"
+                aria-label="Diagram of the neural network layers and activations"></canvas>
       </div>
     </section>
 
     <!-- ===== Drawing + predictions ===== -->
-    <section class="play-section">
-      <div class="pad-column">
-        <div class="pad-wrap">
-          <canvas id="pad" width="256" height="256"></canvas>
+    <section class="playground">
+      <div class="drawing-panel">
+        <div class="canvas-frame">
+          <canvas id="pad" width="256" height="256"
+                  aria-label="Drawing surface"></canvas>
         </div>
-        <div class="pad-controls">
+        <div class="pad-toolbar">
           <button id="clearBtn" type="button">Clear</button>
-          <label class="brush">
+          <label class="brush-control">
             Pen
             <input id="brush" type="range" min="4" max="24" value="12" />
           </label>
-          <span id="inferTime" class="status"></span>
+          <span id="inferTime" class="status-text" role="status"></span>
+        </div>
+        <div class="model-input">
+          <canvas id="netInput" width="28" height="28" role="img"
+                  aria-label="Downsampled 28 by 28 pixel view of the drawing"></canvas>
+          <span>what the model sees (28&times;28)</span>
         </div>
         <p class="hint">Draw a doodle above. Predictions update automatically.</p>
       </div>
 
-      <div class="results-column">
+      <div class="results-panel">
         <h2>Top 3 guesses</h2>
         <ol id="predictions" class="predictions">
           <li class="placeholder">Start drawing to see predictions&hellip;</li>
@@ -51,10 +59,10 @@
     </section>
   </main>
 
-  <footer>
+  <footer class="site-footer">
     <span id="footerNote">Model made from scratch with NumPy &middot; runs entirely in your browser</span>
   </footer>
 
-  <script src="app.js?v=2"></script>
+  <script src="app.js?v=3"></script>
 </body>
 </html>

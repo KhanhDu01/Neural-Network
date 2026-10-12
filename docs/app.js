@@ -235,7 +235,9 @@ document.getElementById("clearBtn").addEventListener("click", () => {
   state.strokes = [];
   state.hasDrawing = false;
   state.acts = null;
+  state.img.fill(0);
   clearPad();
+  drawNetInput();
   renderPredictions([], 0);
   renderStaticDiagram();
 });
@@ -251,6 +253,11 @@ document.getElementById("clearBtn").addEventListener("click", () => {
  * Then (mirroring main/Layer.py load_drawing): render the strokes on a 256x256
  * canvas with a width-5 white brush and downsample to 28x28. The model input is
  * the resulting grayscale array divided by 255.
+ *
+ * The 256->28 downsample is done with a manual area average rather than
+ * ctx.drawImage: Firefox's drawImage filter aliases these thin strokes wildly
+ * (a circle became "animal migration"), while an area average is identical in
+ * every browser and matches Pillow's resize closely.
  */
 function normalizeStrokes() {
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
@@ -297,25 +304,49 @@ function preprocess() {
     g.stroke();
   }
 
-  const c28 = document.createElement("canvas");
-  c28.width = c28.height = 28;
-  const h = c28.getContext("2d");
-  h.imageSmoothingEnabled = true;
-  h.imageSmoothingQuality = "high";
-  h.drawImage(c256, 0, 0, 28, 28);
-
-  const data = h.getImageData(0, 0, 28, 28).data;
+  const src = g.getImageData(0, 0, 256, 256).data;
   const out = state.img;
-  for (let i = 0; i < 784; i++) out[i] = data[i * 4] / 255;
+  for (let oy = 0; oy < 28; oy++) {
+    const y0 = Math.floor((oy * 256) / 28);
+    const y1 = Math.ceil(((oy + 1) * 256) / 28);
+    for (let ox = 0; ox < 28; ox++) {
+      const x0 = Math.floor((ox * 256) / 28);
+      const x1 = Math.ceil(((ox + 1) * 256) / 28);
+      let sum = 0;
+      let n = 0;
+      for (let y = y0; y < y1; y++) {
+        const row = y * 256;
+        for (let x = x0; x < x1; x++) {
+          sum += src[(row + x) * 4];
+          n++;
+        }
+      }
+      out[oy * 28 + ox] = sum / n / 255;
+    }
+  }
   return out;
 }
 
 /* ============================ inference ============================= */
 
+const netInput = document.getElementById("netInput");
+const nctx = netInput.getContext("2d");
+
+function drawNetInput() {
+  const img = nctx.createImageData(28, 28);
+  for (let i = 0; i < 784; i++) {
+    const v = Math.round(state.img[i] * 255);
+    img.data[i * 4] = img.data[i * 4 + 1] = img.data[i * 4 + 2] = v;
+    img.data[i * 4 + 3] = 255;
+  }
+  nctx.putImageData(img, 0, 0);
+}
+
 function predict() {
   if (!state.meta || !state.hasDrawing) return;
   const t0 = performance.now();
   const input = preprocess();
+  drawNetInput();
   const acts = forward(input);
   const dt = performance.now() - t0;
 
